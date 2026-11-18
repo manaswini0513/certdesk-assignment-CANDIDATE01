@@ -10,13 +10,36 @@ function escapeHtml(value) {
 }
 
 // Call the JSON API. Never throws: network errors come back as status 0.
+let csrfToken = null;
+
+async function ensureCsrfToken() {
+  if (csrfToken) return csrfToken;
+  try {
+    const res = await fetch("/api/auth/csrf-token", { credentials: "same-origin" });
+    const body = await res.json();
+    csrfToken = body?.data?.csrf_token || null;
+  } catch (_) {
+    csrfToken = null;
+  }
+  return csrfToken;
+}
+
 async function api(path, options = {}) {
   let res;
+  const method = (options.method || "GET").toUpperCase();
+  const isFormData = options.body instanceof FormData;
+  const headers = isFormData ? {} : { "Content-Type": "application/json" };
+
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const token = await ensureCsrfToken();
+    if (token) headers["X-CSRF-Token"] = token;
+  }
+
   try {
     res = await fetch(path, {
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
       ...options,
+      headers,
+      credentials: "same-origin",
     });
   } catch (_) {
     return {

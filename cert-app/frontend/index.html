@@ -54,6 +54,8 @@
     </div>
   </header>
 
+  <div id="bulk-progress-banner" class="bulk-progress-banner hidden" aria-live="polite"></div>
+
   <main class="container">
     <!-- 1. Certificates list -->
     <section id="tab-certificates" class="panel">
@@ -124,7 +126,12 @@
         </div>
       </div>
 
-      <div class="issue-grid">
+      <div class="issue-mode-toggle" aria-label="Issue mode selector">
+        <button type="button" class="mode-btn active" data-issue-mode="single">Single</button>
+        <button type="button" class="mode-btn" data-issue-mode="bulk">Bulk (CSV)</button>
+      </div>
+
+      <div id="single-issue-pane" class="issue-grid">
         <form id="issue-form" class="card form-card stack" novalidate>
           <div class="field">
             <label for="recipient_name">Recipient name</label>
@@ -147,7 +154,6 @@
             <small class="field-error" data-for="issue_date"></small>
           </div>
 
-          <!-- Where the certificate email goes from (filled in by app.js) -->
           <div id="delivery"></div>
 
           <div id="issue-message" class="alert hidden" role="alert"></div>
@@ -185,6 +191,54 @@
             </div>
           </div>
           <p class="preview-note" id="preview-note">Preview. The certificate ID is created when you issue it.</p>
+        </div>
+      </div>
+
+      <div id="bulk-issue-pane" class="card bulk-panel hidden">
+        <div class="bulk-topbar">
+          <div>
+            <h2>Bulk issue from CSV</h2>
+            <p class="page-sub">Upload a list of recipients, check every row, then approve the valid ones.</p>
+          </div>
+          <a class="btn btn-secondary btn-sm" href="/sample-bulk.csv" download>Download sample CSV</a>
+        </div>
+
+        <form id="bulk-upload-form" class="bulk-upload" novalidate>
+          <label class="bulk-dropzone" for="bulk-file">
+            <input id="bulk-file" name="file" type="file" accept=".csv,text/csv" />
+            <span class="bulk-drop-copy">
+              <strong>Choose a CSV file</strong>
+              <small id="bulk-file-name">or drag it here. Up to 500 rows and 1 MB.</small>
+            </span>
+          </label>
+          <div class="bulk-actions">
+            <button type="submit" class="btn btn-primary">Check CSV</button>
+          </div>
+        </form>
+
+        <div id="bulk-message" class="alert hidden" role="alert"></div>
+
+        <div id="bulk-preview" class="bulk-preview hidden">
+          <div class="bulk-summary" id="bulk-summary"></div>
+          <div class="bulk-table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Row</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Course</th>
+                  <th>Issue date</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="bulk-rows"></tbody>
+            </table>
+          </div>
+          <div class="bulk-footer">
+            <button type="button" id="bulk-cancel" class="btn btn-secondary">Cancel</button>
+            <button type="button" id="bulk-approve" class="btn btn-primary">Approve and issue</button>
+          </div>
         </div>
       </div>
     </section>

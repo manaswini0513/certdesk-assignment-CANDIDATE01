@@ -1,4 +1,6 @@
 import re
+from datetime import date
+
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PASSWORD_MIN_LEN = 8
 PASSWORD_MAX_LEN = 128
@@ -46,5 +48,66 @@ def validate_signup_payload(data):
     else:
         # Not trimmed on purpose: spaces are allowed in passwords.
         cleaned["password"] = password
+
+    return cleaned, errors
+
+
+def validate_certificate_payload(data):
+    """Validate certificate payload and return cleaned fields plus validation errors."""
+    errors = {}
+    cleaned = {}
+
+    recipient_name = data.get("recipient_name")
+    if recipient_name is None or (isinstance(recipient_name, str) and not recipient_name.strip()):
+        errors["recipient_name"] = "This field is required"
+    elif not isinstance(recipient_name, str):
+        errors["recipient_name"] = "Must be a string"
+    else:
+        value = recipient_name.strip()
+        if not 2 <= len(value) <= 100:
+            errors["recipient_name"] = "Must be between 2 and 100 characters"
+        else:
+            cleaned["recipient_name"] = value
+
+    recipient_email = data.get("recipient_email")
+    if recipient_email is None or (isinstance(recipient_email, str) and not recipient_email.strip()):
+        errors["recipient_email"] = "This field is required"
+    elif not isinstance(recipient_email, str):
+        errors["recipient_email"] = "Must be a string"
+    else:
+        value = recipient_email.strip().lower()
+        if not EMAIL_RE.match(value):
+            errors["recipient_email"] = "Must be a valid email address"
+        else:
+            cleaned["recipient_email"] = value
+
+    course_name = data.get("course_name")
+    if course_name is None or (isinstance(course_name, str) and not course_name.strip()):
+        errors["course_name"] = "This field is required"
+    elif not isinstance(course_name, str):
+        errors["course_name"] = "Must be a string"
+    else:
+        value = course_name.strip()
+        if not 2 <= len(value) <= 150:
+            errors["course_name"] = "Must be between 2 and 150 characters"
+        else:
+            cleaned["course_name"] = value
+
+    issue_date = data.get("issue_date")
+    if issue_date is None or (isinstance(issue_date, str) and not issue_date.strip()):
+        errors["issue_date"] = "This field is required"
+    elif not isinstance(issue_date, str):
+        errors["issue_date"] = "Must be a string"
+    else:
+        value = issue_date.strip()
+        try:
+            parsed_date = date.fromisoformat(value)
+        except ValueError:
+            errors["issue_date"] = "Must be in YYYY-MM-DD format"
+        else:
+            if parsed_date > date.today():
+                errors["issue_date"] = "Must not be in the future"
+            else:
+                cleaned["issue_date"] = value
 
     return cleaned, errors

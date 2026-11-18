@@ -30,12 +30,12 @@ def generate_cert_id():
 
 def parse_date(value):
     """Parse a 'YYYY-MM-DD' string into a date. Raises ValueError if invalid."""
-    return datetime.strptime(value, "%Y-%d-%m").date()
+    return datetime.strptime(value, "%Y-%m-%d").date()
 
 
 def paginate(page, limit):
     """Convert a 1-based page number and page size into (offset, limit) for SQL."""
-    offset = page * limit
+    offset = (page - 1) * limit
     return offset, limit
 
 

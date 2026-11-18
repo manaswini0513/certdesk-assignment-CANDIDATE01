@@ -336,11 +336,102 @@ the issue date, the certificate ID, and how to verify it.
 
 ---
 
-## Bulk issue (you design this)
+## Bulk issue
 
-Task 4 in `README.md` asks you to design this part of the API. Document your endpoints here,
-in the same style as the sections above: method and path, login needed or not, request body,
-responses with their status codes, and errors.
+Bulk issue lets a logged-in user upload a CSV file, review each row before it is issued, and then
+approve the upload to issue the ready rows in the background while the user keeps working.
+
+### B1. Upload a CSV and preview the rows
+
+`POST /api/bulk-issues`
+
+**Login required.**
+
+**Request**: multipart form-data with a single file field named `file`.
+
+- `file` must be a UTF-8 CSV file.
+- `1 MB` max size, `500` rows max.
+- The file must include the header row and at least these columns: `recipient_name`,
+  `recipient_email`, `course_name`, `issue_date`.
+- Extra columns are ignored; empty lines are skipped.
+
+**Response `200`**
+
+```json
+{
+  "job_id": "BULK-9BEA4FA12C3D",
+  "status": "pending",
+  "summary": { "total": 3, "ready": 2, "errors": 1, "issued": 0, "failed": 0 },
+  "rows": [
+    { "row_number": 1, "recipient_name": "Priya Nair", "recipient_email": "priya.nair@example.com", "course_name": "Flask Web Development", "issue_date": "2026-03-25", "status": "ready", "error": null },
+    { "row_number": 2, "recipient_name": "Rohan Mehta", "recipient_email": "rohan.mehta@example.com", "course_name": "Flask Web Development", "issue_date": "2026-03-25", "status": "ready", "error": null },
+    { "row_number": 3, "recipient_name": "Bad Row", "recipient_email": "bad-email", "course_name": "Flask Web Development", "issue_date": "2026-03-25", "status": "error", "error": "Must be a valid email address" }
+  ]
+}
+```
+
+- `400` → `VALIDATION_ERROR` if the CSV is missing, empty, too large, invalid UTF-8, missing required columns, or has no data rows.
+
+The preview must validate every row using the same rules as the single-certificate API; rows with
+problems are marked as `status: "error"` instead of being issued. Nothing is issued yet.
+
+### B2. Approve and start issuing
+
+`POST /api/bulk-issues/<job_id>/approve`
+
+**Login required.**
+
+Returns immediately once the server has accepted the job. The actual certificate creation then happens
+in the background.
+
+- `202 Accepted` → `{ "job_id": "BULK-9BEA4FA12C3D", "status": "processing" }`
+- `404` → `NOT_FOUND` if the job does not belong to the logged-in user
+- `409` → `CONFLICT` if the job was already approved, started, or has no rows ready to issue
+
+### B3. Get job status and results
+
+`GET /api/bulk-issues/<job_id>`
+
+**Login required.**
+
+Returns the current state of the job and the per-row result list.
+
+**Response `200`**
+
+```json
+{
+  "job": {
+    "job_id": "BULK-9BEA4FA12C3D",
+    "filename": "students.csv",
+    "status": "completed",
+    "summary": { "total": 3, "ready": 2, "errors": 1, "issued": 2, "failed": 0 },
+    "created_at": "2026-03-25T10:15:00+00:00",
+    "started_at": "2026-03-25T10:16:00+00:00",
+    "completed_at": "2026-03-25T10:16:02+00:00",
+    "rows": [
+      { "row_number": 1, "recipient_name": "Priya Nair", "recipient_email": "priya.nair@example.com", "course_name": "Flask Web Development", "issue_date": "2026-03-25", "status": "issued", "error": null, "cert_id": "CERT-A1B2C3D4" },
+      { "row_number": 2, "recipient_name": "Rohan Mehta", "recipient_email": "rohan.mehta@example.com", "course_name": "Flask Web Development", "issue_date": "2026-03-25", "status": "issued", "error": null, "cert_id": "CERT-E5F6G7H8" },
+      { "row_number": 3, "recipient_name": "Bad Row", "recipient_email": "bad-email", "course_name": "Flask Web Development", "issue_date": "2026-03-25", "status": "error", "error": "Must be a valid email address", "cert_id": null }
+    ]
+  }
+}
+```
+
+- `404` → `NOT_FOUND` if the job isn't yours
+
+### B4. Download the results as CSV
+
+`GET /api/bulk-issues/<job_id>/results.csv`
+
+**Login required.**
+
+Returns a CSV file with one row per upload row and its final status.
+
+- `200` → CSV attachment
+- `404` → `NOT_FOUND`
+
+The CSV columns are: `row_number`, `recipient_name`, `recipient_email`, `course_name`, `issue_date`,
+`status`, `cert_id`, `error`.
 
 ---
 

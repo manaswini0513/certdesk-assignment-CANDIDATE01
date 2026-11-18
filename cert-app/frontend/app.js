@@ -270,6 +270,207 @@ $("#next-page").addEventListener("click", () => {
 // ---------- 2. Issue form ----------
 const issueForm = $("#issue-form");
 const issueMessage = $("#issue-message");
+const bulkUploadForm = $("#bulk-upload-form");
+const bulkMessage = $("#bulk-message");
+const bulkPreview = $("#bulk-preview");
+const bulkState = { jobId: null, preview: null, timer: null };
+
+function setIssueMode(mode) {
+  const single = mode === "single";
+  $("#single-issue-pane").classList.toggle("hidden", !single);
+  $("#bulk-issue-pane").classList.toggle("hidden", single);
+  $$("[data-issue-mode]").forEach((btn) => btn.classList.toggle("active", btn.dataset.issueMode === mode));
+}
+
+$$("[data-issue-mode]").forEach((btn) => {
+  btn.addEventListener("click", () => setIssueMode(btn.dataset.issueMode));
+});
+
+function persistBulkJob(jobId) {
+  if (jobId) localStorage.setItem("certdesk-bulk-job", jobId);
+  else localStorage.removeItem("certdesk-bulk-job");
+}
+
+function clearBulkPreview() {
+  bulkState.jobId = null;
+  bulkState.preview = null;
+  persistBulkJob(null);
+  bulkPreview.classList.add("hidden");
+  $("#bulk-summary").innerHTML = "";
+  $("#bulk-rows").innerHTML = "";
+  hideMessage(bulkMessage);
+}
+
+function renderBulkSummary(summary = {}) {
+  const total = Number(summary.total || 0);
+  const ready = Number(summary.ready || 0);
+  const errors = Number(summary.errors || 0);
+  $("#bulk-summary").innerHTML = `
+    <span class="summary-pill"><strong>${total}</strong> total</span>
+    <span class="summary-pill ok"><strong>${ready}</strong> ready</span>
+    <span class="summary-pill bad"><strong>${errors}</strong> errors</span>
+  `;
+}
+
+function renderBulkPreview(rows = [], summary = {}) {
+  renderBulkSummary(summary);
+  if (!rows.length) {
+    $("#bulk-rows").innerHTML = `<tr><td colspan="6"><div class="empty">No rows to show.</div></td></tr>`;
+    return;
+  }
+  $("#bulk-rows").innerHTML = rows.map((row) => {
+    const statusClass = row.status === "ready" ? "ready" : row.status === "error" ? "bad" : "warn";
+    const safeEmail = escapeHtml(row.recipient_email || "");
+    return `
+      <tr>
+        <td>${escapeHtml(row.row_number)}</td>
+        <td>${escapeHtml(row.recipient_name || "")}</td>
+        <td class="mono">${safeEmail}</td>
+        <td>${escapeHtml(row.course_name || "")}</td>
+        <td>${escapeHtml(row.issue_date || "")}</td>
+        <td><span class="bulk-status ${statusClass}">${escapeHtml(row.status)}</span>${row.error ? `<div class="bulk-error">${escapeHtml(row.error)}</div>` : ""}</td>
+      </tr>`;
+  }).join("");
+  bulkPreview.classList.remove("hidden");
+}
+
+function showBulkJobStatus(job) {
+  const banner = $("#bulk-progress-banner");
+  if (!job) {
+    banner.classList.add("hidden");
+    return;
+  }
+  const progress = job.summary || {};
+  const done = Number(progress.issued || 0) + Number(progress.failed || 0);
+  const total = Number(progress.total || 0) || 1;
+  const title = job.status === "completed" ? `Bulk issue complete: ${done} of ${total} rows finished.` : `Bulk issue: ${done} of ${total}`;
+  banner.innerHTML = `
+    <strong>${escapeHtml(title)}</strong>
+    ${job.status === "completed" ? `<a href="/api/bulk-issues/${encodeURIComponent(job.job_id)}/results.csv" target="_blank" rel="noreferrer">Download CSV</a>` : ""}
+  `;
+  banner.classList.remove("hidden");
+}
+
+function stopBulkPolling() {
+  if (bulkState.timer) {
+    clearInterval(bulkState.timer);
+    bulkState.timer = null;
+  }
+}
+
+async function pollBulkJob(jobId) {
+  if (!jobId) return;
+  const { ok, body } = await request(`/api/bulk-issues/${encodeURIComponent(jobId)}`);
+  if (!ok) return;
+
+  const job = body.job;
+  showBulkJobStatus(job);
+
+  if (job.status === "pending" || job.status === "processing") {
+    stopBulkPolling();
+    bulkState.timer = setInterval(async () => {
+      await pollBulkJob(jobId);
+    }, 2000);
+    return;
+  }
+
+  stopBulkPolling();
+  if (job.status === "completed" || job.status === "failed") {
+    const summary = job.summary || {};
+    showMessage(bulkMessage, `Bulk issue ${job.status === "completed" ? "finished" : "stopped"}. ${summary.issued || 0} issued, ${summary.failed || 0} failed.`, job.status === "completed" ? "success" : "error");
+  }
+}
+
+const bulkFileInput = $("#bulk-file");
+const bulkFileName = $("#bulk-file-name");
+
+bulkFileInput.addEventListener("change", () => {
+  const file = bulkFileInput.files?.[0];
+  bulkFileName.textContent = file ? `Selected: ${file.name}` : "or drag it here. Up to 500 rows and 1 MB.";
+  if (file) {
+    bulkUploadForm.requestSubmit();
+  }
+});
+
+bulkUploadForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  hideMessage(bulkMessage);
+  const file = bulkFileInput.files?.[0];
+  if (!file) {
+    showMessage(bulkMessage, "Choose a CSV file before checking it.", "error");
+    return;
+  }
+  const formData = new FormData();
+  formData.append("file", file);
+  const button = bulkUploadForm.querySelector('button[type="submit"]');
+  setLoading(button, true);
+
+  const { ok, body } = await request("/api/bulk-issues", {
+    method: "POST",
+    body: formData,
+    headers: {},
+  });
+  setLoading(button, false);
+
+  if (!ok) {
+    showMessage(bulkMessage, body?.error?.message || "The CSV could not be checked.", "error");
+    clearBulkPreview();
+    return;
+  }
+
+  bulkState.jobId = body.job_id;
+  bulkState.preview = body;
+  persistBulkJob(body.job_id);
+  renderBulkPreview(body.rows, body.summary);
+  showMessage(bulkMessage, `${body.summary.ready} row(s) are ready to issue. ${body.summary.errors} row(s) need attention.`, "info");
+  showBulkJobStatus({ job_id: body.job_id, status: "pending", summary: body.summary });
+});
+
+$("#bulk-cancel").addEventListener("click", () => {
+  clearBulkPreview();
+  $("#bulk-file").value = "";
+  showMessage(bulkMessage, "The upload was cancelled. You can check another CSV anytime.", "info");
+});
+
+$("#bulk-approve").addEventListener("click", async () => {
+  if (!bulkState.jobId) return;
+  const hasEmail = Boolean(emailSettings);
+  if (!hasEmail) {
+    showMessage(bulkMessage, "Email isn't connected, so the certificate rows will still be issued without sending any email notifications.", "warn");
+  }
+  const { ok, body } = await request(`/api/bulk-issues/${encodeURIComponent(bulkState.jobId)}/approve`, {
+    method: "POST",
+  });
+  if (!ok) {
+    showMessage(bulkMessage, body?.error?.message || "The bulk issue could not be approved.", "error");
+    return;
+  }
+
+  persistBulkJob(bulkState.jobId);
+  showMessage(bulkMessage, "Bulk issue started in the background. You can keep working while it completes.", "success");
+  await pollBulkJob(bulkState.jobId);
+});
+
+async function restoreBulkProgress() {
+  const savedJobId = localStorage.getItem("certdesk-bulk-job");
+  if (!savedJobId) return;
+  bulkState.jobId = savedJobId;
+  const { ok, body } = await request(`/api/bulk-issues/${encodeURIComponent(savedJobId)}`);
+  if (!ok) {
+    persistBulkJob(null);
+    bulkState.jobId = null;
+    return;
+  }
+  const job = body.job;
+  bulkState.preview = job;
+  if (job.rows && job.rows.length) {
+    renderBulkPreview(job.rows, job.summary);
+  }
+  showBulkJobStatus(job);
+  if (job.status === "pending" || job.status === "processing") {
+    pollBulkJob(savedJobId);
+  }
+}
 
 function setPreviewText(el, value, placeholder) {
   el.textContent = value || placeholder;
@@ -314,9 +515,9 @@ issueForm.addEventListener("submit", async (e) => {
   hideMessage(issueMessage);
 
   const payload = {
-    recipientName: issueForm.recipient_name.value,
-    recipient_email: issueForm.recipient_email.value,
-    course_name: issueForm.course_name.value,
+    recipient_name: issueForm.recipient_name.value.trim(),
+    recipient_email: issueForm.recipient_email.value.trim(),
+    course_name: issueForm.course_name.value.trim(),
     issue_date: issueForm.issue_date.value,
   };
 
@@ -625,11 +826,20 @@ $("#verify-form").addEventListener("submit", async (e) => {
 
 // ---------- Start ----------
 (async function start() {
+  setIssueMode("single");
   resetIssueForm();
   updatePreview();
   renderEmail();
   if (!(await loadUser())) return;
   await loadEmailSettings();
   fillEmailForm();
+  await restoreBulkProgress();
   showTab(window.location.hash.slice(1));
+
+  // Re-check the session every minute. This sends the user back to login promptly
+  // after inactivity expires, even if they remain on an open tab.
+  setInterval(async () => {
+    const { ok } = await request("/api/auth/me");
+    if (!ok) goToLogin();
+  }, 60 * 1000);
 })();
